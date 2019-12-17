@@ -7,7 +7,264 @@ from os import path
 
 data_dir = path.join("..", "data")
 
-def make_sidebar(trending_df, trending_df2=None):
+def main_page():
+    # Create the title
+    st.markdown('''<div style="font-size:5pt; 
+                               font-weight:100; 
+                               text-align:center; 
+                               width=100%;">
+                     <span style="font-size:40pt;">KIDDOS</span><br>
+                     <span style="font-size:15pt; 
+                                  color:#a1a1a1;">Kurated Informative Documents Describing Our Society</span>
+                   </div>''',
+                unsafe_allow_html=True)
+
+    # Prompt User to enter a topic they'd like to discuss
+    st.markdown('<div style="text-align:center; font-size:12pt;"><br><br>I want to talk to my kids about...</div>',
+                unsafe_allow_html=True)
+
+    all_issues = "Everything!"
+    issues_list = [all_issues,
+                   'Bullying',
+                   'Civil Rights',
+                   'Civic Engagement',
+                   'Climate Change',
+                   'Gender Equality',
+                   'Gun Control',
+                   'Homelessness',
+                   'Immigration',
+                   'LGBTQ+',
+                   'Substance Abuse',
+                   'Sustainability']
+    option = st.selectbox('', issues_list)
+
+    # Pull in the trending data
+    trendlines_df = pd.read_csv(path.join(data_dir, 'trend30.csv'))
+
+    # Pull in the data about the movies
+    trending_df = pd.read_csv(path.join(data_dir, 'app_data.tsv'), sep='\t')
+
+    # Pul in the matching movie to social issue data and merge
+    match_df = pd.read_csv(path.join(data_dir, 'issue_matching.csv'))
+    trending_df['imdb_id'] = trending_df['imdb_id'].str.replace('tt','').astype(int)
+    trending_df = trending_df.merge(match_df[['imdb_id','social_issue','match_score']])
+
+    # Process data to proper format
+    trending_df = trending_df.rename(columns={'release_year': 'original_release_year',
+                                              'hbogo_url': 'hbo_url',
+                                              'short_desc': 'summary'})
+    trending_df['scores'] = trending_df['scores'].fillna('{}')
+
+    # Adjust scores to be a column per score
+    trending_df_split = [ast.literal_eval(trending_df['scores'][i]) for i in trending_df.index]
+    trending_df_split = pd.DataFrame(trending_df_split)
+    trending_df = trending_df.join(trending_df_split)
+    trending_df = trending_df.rename(columns={'Consumerism': 'consumerism_score',
+                                              'Drinking, Drugs & Smoking': 'drinking_drugs_smoking_score',
+                                              'Language': 'language_score',
+                                              'Positive Messages': 'positive_messages_score',
+                                              'Positive Role Models & Representations': 'positive_role_models_score',
+                                              'Sex': 'sex_score',
+                                              'Violence': 'violence_score',
+                                              'Educational Value': 'educational_value_score',
+                                              'Sexy Stuff': 'sexy_stuff_score',
+                                              'Violence & Scariness': 'violence_scariness_score'})
+
+    # Fill missing data with defaults
+    trending_df['hbo_url'] = trending_df['hbo_url'].fillna('https://play.hbonow.com/')
+    trending_df['movie_trailer_url'] = trending_df['movie_trailer_url'].fillna('https://play.hbonow.com/')
+    trending_df['age_child'] = trending_df['age_child'].fillna('Not Set')
+    trending_df = trending_df[~trending_df['title'].astype(str).str.contains('{')]
+
+    # Fill missing scores with 0
+    all_scores = ['consumerism_score','positive_messages_score','positive_role_models_score','educational_value_score','violence_score','sex_score','language_score','consumerism_score','drinking_drugs_smoking_score','sexy_stuff_score','violence_scariness_score']
+    for score in all_scores:
+        trending_df[score] = trending_df[score].fillna(0).astype(int)
+        trending_df[score] = np.where(~trending_df[score].isin([1,2,3,4,5]), 0, trending_df[score])
+
+    # Invert "negative" scores so they can be assessed similarly to the "positive" scores
+    neg_scores = ['violence_score','sex_score','language_score','consumerism_score','drinking_drugs_smoking_score','sexy_stuff_score','violence_scariness_score']
+    for neg_score in neg_scores:
+        trending_df['neg_' + neg_score] = np.where(trending_df[neg_score] == 1, 5,
+                                                   np.where(trending_df[neg_score] == 2, 4,
+                                                            np.where(trending_df[neg_score] == 4, 2,
+                                                                     np.where(trending_df[neg_score] == 5, 1,
+                                                                              trending_df[neg_score]))))
+
+    # Calculate a VERY basic average score for each title
+    trending_df['non_zero_scores'] = trending_df[all_scores].astype(bool).sum(axis=1) + 1
+    trending_df = trending_df.dropna()
+    trending_df['original_release_year'] = trending_df['original_release_year'].astype(int)
+    trending_df['avg_score'] = ((trending_df[['positive_messages_score',
+                                             'positive_role_models_score',
+                                              'educational_value_score',
+                                              'neg_violence_score',
+                                              'neg_sex_score',
+                                              'neg_language_score',
+                                              'neg_consumerism_score',
+                                              'neg_drinking_drugs_smoking_score',
+                                              'neg_sexy_stuff_score',
+                                              'neg_violence_scariness_score']].sum(axis=1) *
+                                 (trending_df['match_score'])).astype(float)/np.where(trending_df['non_zero_scores'] == 0, 1, trending_df['non_zero_scores'])).round(1).astype(float)
+
+    # Have a little party
+    btn = st.button('I found a useful movie!')
+    if btn:
+        st.balloons()
+
+    st.markdown('<br><br><hr>',
+                unsafe_allow_html=True)
+
+    # If the user hasn't chosen a topic, show the top videos by trending topic
+    if option == all_issues:
+        new_trending_df = draw_sidebar(trending_df)
+
+        # Filter to the top titles for each social issue
+        titles = new_trending_df.sort_values(['avg_score','original_release_year'], ascending=False).groupby('social_issue').first().reset_index().title.dropna().unique().tolist()
+        new_trending_df = new_trending_df[new_trending_df['title'].isin(titles)]
+
+        # Show the titles
+        st.markdown(
+            '<br><br><div style="font-size: 22pt; font-weight:100; text-align:center; margin-left: 30%; width:40%; border-bottom: 0.5pt #a1a1a1 solid;">Trending Topics</div><br>',
+            unsafe_allow_html=True)
+
+        # Find the order to display the issues based on their relative relevance
+        last_date_df = trendlines_df[trendlines_df.Date == trendlines_df.Date.max()]
+        del last_date_df['Date']
+        last_date_df = last_date_df.T.reset_index().sort_values(len(trendlines_df.index) - 1, ascending=False).rename(
+            columns={'index': 'social_issue'})
+
+        trending_issues = last_date_df.social_issue.dropna().unique().tolist()
+
+        # For each social issue, show the top video
+        for issue in trending_issues:
+            title_df = new_trending_df[new_trending_df['social_issue'] == issue]
+            if len(title_df):
+                st.markdown('<div>' + \
+                            '  <div style="display:inline-block; width:50%;">' + \
+                            f'    <span style="font-size:18pt; font-weight:600;">&emsp;&emsp;{issue.replace("_", " ").title()}</span>'
+                            '  </div><br><br><br>' + \
+                            '  <div style="width:80%; text-align:center;">' + \
+                            '     <span style="font-size:8pt; text-align:center;">Trending Activity:</span><br><br>',
+                            unsafe_allow_html=True)
+
+                # Shows the trend for the issue
+                st.line_chart(trendlines_df.set_index('Date')[[issue]].rename(columns={issue: 'Relative Interest'}),
+                              width=700,
+                              height=10)
+                st.markdown('  </div><br><br><br><br>' + \
+                            '</div>',
+                            unsafe_allow_html=True)
+
+                draw_title(title_df)
+
+                st.markdown('<br><br><br>',
+                            unsafe_allow_html=True)
+
+    # If the user chooses an issue to dig into, do this
+    else:
+        # Filter to the issue and make sure that there is associated data. If there isn't default to just send the user to HBO
+        trending_df2 = trending_df[trending_df['social_issue'] == option]
+        tmp_titles = trending_df2['title'].unique()
+        if len(trending_df2) > 1:
+            new_trending_df = draw_sidebar(trending_df, trending_df2)
+
+            # Find if the data still has titles present, if not, default to send user to HBO
+            if option in new_trending_df.social_issue.dropna().unique().tolist():
+
+                # Show titles in descending avg_score order
+                new_trending_df = new_trending_df.sort_values('avg_score', ascending=False).head(10)
+                titles = new_trending_df.title.dropna().unique()
+                st.markdown('<div>' + \
+                            '  <div style="display:inline-block; width:50%;">' + \
+                            f'    <span style="font-size:18pt; font-weight:600;">&emsp;&emsp;{option.replace("_", " ").title()}</span>'
+                            '  </div><br><br><br>',
+                            unsafe_allow_html=True)
+
+                # Show the top 10 titles for the issue based on average score
+                for title in titles:
+
+                    # Check that there is actually data
+                    title_df = new_trending_df[new_trending_df['title'] == title]
+                    draw_title(title_df)
+                    
+
+        else:
+            st.markdown(
+                '<div style="width:100%; text-align: center; font-size:20pt; padding-top: 50px;">No Options...but there are a lot of great shows on <a href="https://play.hbonow.com/"><img style="width:350px; height:150px; display:inline-block;" src="data:image/png;base64,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"></a></div>',
+                unsafe_allow_html=True)
+      
+    # end of function
+    pass
+    
+    
+def draw_title(title_df):
+    if len(title_df):
+
+        # superrr inefficienttttt but blegh
+        poster = title_df.poster.values[0]
+        release_year = title_df.original_release_year.values[0]
+        title = title_df.title.values[0]
+        summary = title_df.summary.values[0]
+        age_child = title_df.age_child.values[0]
+        positive_messages_score = title_df.positive_messages_score.values[
+            0]
+        positive_role_models_score = title_df.positive_role_models_score.values[0]
+        violence_score = title_df.violence_score.values[0]
+        sex_score = title_df.sex_score.values[0]
+        language_score = title_df.language_score.values[0]
+        consumerism_score = title_df.consumerism_score.values[0]
+        drinking_drugs_smoking_score = title_df.drinking_drugs_smoking_score.values[0]
+        avg_score = title_df.avg_score.values[0]
+        hbo_url = title_df.hbo_url.values[0]
+        sexy_stuff_score = title_df.sexy_stuff_score.values[0]
+        educational_value_score = title_df.educational_value_score.values[0]
+        violence_scariness_score = title_df.violence_scariness_score.values[0]
+        movie_trailer_url = title_df.movie_trailer_url.values[0]
+
+        # Actually display the title details
+        st.markdown('<div style="width:100%;">' + \
+                    '  <div style="display:inline-block; width:20%;">' + \
+                    f'    <div style="display:inline-block; width:50px;"></div><img style="display:inline-block;" src="{poster}" width:50px; height:100px;>'
+                    '  </div>' + \
+                    '  <div style="display:inline-block; padding-left: 50px; vertical-align:top; width: 50%;">' + \
+                    f'    <span style="font-size:12pt;">{title}</span><br>' + \
+                    f'    <span style="font-size: 10pt; color:#a1a1a1;">{summary[:200]}...<a style="color:#a1a1a1; font-size:8pt; font-weight:600;"> Read More</a></span><br>' + \
+                    f'    <span style="font-size: 10pt;">Recommended Age: {age_child}</span><br>' + \
+                    f'    <span style="font-size: 10pt;">Release Year: {release_year}</span><br><br>' + \
+                    f'    <span style="font-size: 10pt; font-weight:600;">Presence Scores (out of 5):</span><br>' + \
+                    f'    <span style="font-size: 10pt;">Positive Messages: {positive_messages_score}</span><br>' + \
+                    f'    <span style="font-size: 10pt;">Positive Role Models: {positive_role_models_score}</span><br>' + \
+                    f'    <span style="font-size: 10pt;">Educational Value: {educational_value_score}</span><br>' + \
+                    f'    <span style="font-size: 10pt;">Violence: {violence_score}</span><br>' + \
+                    f'    <span style="font-size: 10pt;">Violence and Scariness: {violence_scariness_score}</span><br>' + \
+                    f'    <span style="font-size: 10pt;">Sex: {sex_score}</span><br>' + \
+                    f'    <span style="font-size: 10pt;">Sexy Stuff: {sexy_stuff_score}</span><br>' + \
+                    f'    <span style="font-size: 10pt;">Language: {language_score}</span><br>' + \
+                    f'    <span style="font-size: 10pt;">Consumerism: {consumerism_score}</span><br>' + \
+                    f'    <span style="font-size: 10pt;">Drinking, Drugs & Smoking: {drinking_drugs_smoking_score}</span><br><br>' + \
+                    f'     <span style="font-size: 10pt; font-weight:600; display:inline-block;">Watch now it on&emsp; </span><a href="{hbo_url}"><img style="width:35px; height:15px; display:inline-block;" src="data:image/png;base64,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"></a>' + \
+                    f'     &emsp;<span style="font-size: 10pt; font-weight:600; display:inline-block;">or</span>&emsp;<a href="{hbo_url}"><img style="width:35px; height:20px; display:inline-block;" src="data:image/png;base64,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"></a>' + \
+                    f'     &emsp;<span style="font-size: 10pt; font-weight:600; display:inline-block;">Watch a trailer on </span>&emsp;<a href="{movie_trailer_url}"><img style="width:60px; height:25px; display:inline-block;" src="data:image/png;base64,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"></a>' + \
+                    '  </div>' + \
+                    '  <div style="display:inline-block; padding-left:30px; float:right; vertical-align:top; width:25%; padding-top:30px;">' + \
+                    f'    <div style="width:100%; padding-top: 10px; color:white; height: 150px; background-color: #a6a7a8; text-align:center; font-size:10pt;">Average Acceptability Score<br><span style="font-size:30pt; color:white;">{avg_score}</span>' + \
+                    '    </div>' + \
+                    '  </div>' + \
+                    '</div>',
+                    unsafe_allow_html=True)
+
+        st.markdown('<br><br><br>',
+                    unsafe_allow_html=True)
+
+    else:
+        st.markdown('<div style="width:100%; text-align: center; font-size:20pt; padding-top: 50px;">No Options...but there are a lot of great shows on <a href="https://play.hbonow.com/"><img style="width:350px; height:150px; display:inline-block;" src="data:image/png;base64,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"></a></div>',
+                 unsafe_allow_html=True)
+    # end function for drawing
+    pass
+
+
+def draw_sidebar(trending_df, trending_df2=None):
     if trending_df2 is None:   # handle the generic case
         trending_df2 = trending_df
    
@@ -297,298 +554,7 @@ def make_sidebar(trending_df, trending_df2=None):
     # hard work done, return the trends!
     return new_trending_df
 
-# Create the title
-st.markdown('''<div style="font-size:5pt; 
-                           font-weight:100; 
-                           text-align:center; 
-                           width=100%;">
-                 <span style="font-size:40pt;">KIDDOS</span><br>
-                 <span style="font-size:15pt; 
-                              color:#a1a1a1;">Kurated Informative Documents Describing Our Society</span>
-               </div>''',
-            unsafe_allow_html=True)
 
-# Prompt User to enter a topic they'd like to discuss
-st.markdown('<div style="text-align:center; font-size:12pt;"><br><br>I want to talk to my kids about...</div>',
-            unsafe_allow_html=True)
-
-all_issues = "Everything!"
-issues_list = ['Everything!',
-               'Bullying',
-               'Civil Rights',
-               'Civic Engagement',
-               'Climate Change',
-               'Gender Equality',
-               'Gun Control',
-               'Homelessness',
-               'Immigration',
-               'LGBTQ+',
-               'Substance Abuse',
-               'Sustainability']
-option = st.selectbox('', issues_list)
-
-# Pull in the trending data
-trendlines_df = pd.read_csv(path.join(data_dir, 'trend30.csv'))
-
-# Pull in the data about the movies
-trending_df = pd.read_csv(path.join(data_dir, 'app_data.tsv'), sep='\t')
-
-# Pul in the matching movie to social issue data and merge
-match_df = pd.read_csv(path.join(data_dir, 'issue_matching.csv'))
-trending_df['imdb_id'] = trending_df['imdb_id'].str.replace('tt','').astype(int)
-trending_df = trending_df.merge(match_df[['imdb_id','social_issue','match_score']])
-
-# Process data to proper format
-trending_df = trending_df.rename(columns={'release_year': 'original_release_year',
-                                          'hbogo_url': 'hbo_url',
-                                          'short_desc': 'summary'})
-trending_df['scores'] = trending_df['scores'].fillna('{}')
-
-# Adjust scores to be a column per score
-trending_df_split = [ast.literal_eval(trending_df['scores'][i]) for i in trending_df.index]
-trending_df_split = pd.DataFrame(trending_df_split)
-trending_df = trending_df.join(trending_df_split)
-trending_df = trending_df.rename(columns={'Consumerism': 'consumerism_score',
-                                          'Drinking, Drugs & Smoking': 'drinking_drugs_smoking_score',
-                                          'Language': 'language_score',
-                                          'Positive Messages': 'positive_messages_score',
-                                          'Positive Role Models & Representations': 'positive_role_models_score',
-                                          'Sex': 'sex_score',
-                                          'Violence': 'violence_score',
-                                          'Educational Value': 'educational_value_score',
-                                          'Sexy Stuff': 'sexy_stuff_score',
-                                          'Violence & Scariness': 'violence_scariness_score'})
-
-# Fill missing data with defaults
-trending_df['hbo_url'] = trending_df['hbo_url'].fillna('https://play.hbonow.com/')
-trending_df['movie_trailer_url'] = trending_df['movie_trailer_url'].fillna('https://play.hbonow.com/')
-trending_df['age_child'] = trending_df['age_child'].fillna('Not Set')
-trending_df = trending_df[~trending_df['title'].astype(str).str.contains('{')]
-
-# Fill missing scores with 0
-all_scores = ['consumerism_score','positive_messages_score','positive_role_models_score','educational_value_score','violence_score','sex_score','language_score','consumerism_score','drinking_drugs_smoking_score','sexy_stuff_score','violence_scariness_score']
-for score in all_scores:
-    trending_df[score] = trending_df[score].fillna(0).astype(int)
-    trending_df[score] = np.where(~trending_df[score].isin([1,2,3,4,5]), 0, trending_df[score])
-
-# Invert "negative" scores so they can be assessed similarly to the "positive" scores
-neg_scores = ['violence_score','sex_score','language_score','consumerism_score','drinking_drugs_smoking_score','sexy_stuff_score','violence_scariness_score']
-for neg_score in neg_scores:
-    trending_df['neg_' + neg_score] = np.where(trending_df[neg_score] == 1, 5,
-                                               np.where(trending_df[neg_score] == 2, 4,
-                                                        np.where(trending_df[neg_score] == 4, 2,
-                                                                 np.where(trending_df[neg_score] == 5, 1,
-                                                                          trending_df[neg_score]))))
-
-# Calculate a VERY basic average score for each title
-trending_df['non_zero_scores'] = trending_df[all_scores].astype(bool).sum(axis=1) + 1
-trending_df = trending_df.dropna()
-trending_df['original_release_year'] = trending_df['original_release_year'].astype(int)
-trending_df['avg_score'] = ((trending_df[['positive_messages_score',
-                                         'positive_role_models_score',
-                                          'educational_value_score',
-                                          'neg_violence_score',
-                                          'neg_sex_score',
-                                          'neg_language_score',
-                                          'neg_consumerism_score',
-                                          'neg_drinking_drugs_smoking_score',
-                                          'neg_sexy_stuff_score',
-                                          'neg_violence_scariness_score']].sum(axis=1) *
-                             (trending_df['match_score'])).astype(float)/np.where(trending_df['non_zero_scores'] == 0, 1, trending_df['non_zero_scores'])).round(1).astype(float)
-
-# Have a little party
-btn = st.button('I found a useful movie!')
-if btn:
-    st.balloons()
-
-st.markdown('<br><br><hr>',
-            unsafe_allow_html=True)
-
-# If the user hasn't chosen a topic, show the top videos by trending topic
-if option == all_issues:
-    new_trending_df = make_sidebar(trending_df)
-
-    # Filter to the top titles for each social issue
-    titles = new_trending_df.sort_values(['avg_score','original_release_year'], ascending=False).groupby('social_issue').first().reset_index().title.dropna().unique().tolist()
-    new_trending_df = new_trending_df[new_trending_df['title'].isin(titles)]
-
-    # Show the titles
-    st.markdown(
-        '<br><br><div style="font-size: 22pt; font-weight:100; text-align:center; margin-left: 30%; width:40%; border-bottom: 0.5pt #a1a1a1 solid;">Trending Topics</div><br>',
-        unsafe_allow_html=True)
-
-    # Find the order to display the issues based on their relative relevance
-    last_date_df = trendlines_df[trendlines_df.Date == trendlines_df.Date.max()]
-    del last_date_df['Date']
-    last_date_df = last_date_df.T.reset_index().sort_values(len(trendlines_df.index) - 1, ascending=False).rename(
-        columns={'index': 'social_issue'})
-
-    trending_issues = last_date_df.social_issue.dropna().unique().tolist()
-
-    # For each social issue, show the top video
-    for issue in trending_issues:
-        title_df = new_trending_df[new_trending_df['social_issue'] == issue]
-        if len(title_df):
-            st.markdown('<div>' + \
-                        '  <div style="display:inline-block; width:50%;">' + \
-                        f'    <span style="font-size:18pt; font-weight:600;">&emsp;&emsp;{issue.replace("_", " ").title()}</span>'
-                        '  </div><br><br><br>' + \
-                        '  <div style="width:80%; text-align:center;">' + \
-                        '     <span style="font-size:8pt; text-align:center;">Trending Activity:</span><br><br>',
-                        unsafe_allow_html=True)
-
-            # Shows the trend for the issue
-            st.line_chart(trendlines_df.set_index('Date')[[issue]].rename(columns={issue: 'Relative Interest'}),
-                          width=700,
-                          height=10)
-            st.markdown('  </div><br><br><br><br>' + \
-                        '</div>',
-                        unsafe_allow_html=True)
-
-            # Definitely a more efficient way to do this but meh
-            poster = title_df.poster.values[0]
-            release_year = title_df.original_release_year.values[0]
-            title = title_df.title.values[0]
-            summary = title_df.summary.values[0]
-            age_child = title_df.age_child.values[0]
-            positive_messages_score = title_df.positive_messages_score.values[
-                0]
-            positive_role_models_score = title_df.positive_role_models_score.values[0]
-            violence_score = title_df.violence_score.values[0]
-            sex_score = title_df.sex_score.values[0]
-            language_score = title_df.language_score.values[0]
-            consumerism_score = title_df.consumerism_score.values[0]
-            drinking_drugs_smoking_score = title_df.drinking_drugs_smoking_score.values[0]
-            avg_score = title_df.avg_score.values[0]
-            hbo_url = title_df.hbo_url.values[0]
-            sexy_stuff_score = title_df.sexy_stuff_score.values[0]
-            violence_scariness_score = title_df.violence_scariness_score.values[0]
-            educational_value_score = title_df.educational_value_score.values[0]
-            movie_trailer_url = title_df.movie_trailer_url.values[0]
-
-            # Finish displaying video details
-            st.markdown('<div style="width:100%;">' + \
-                        '  <div style="display:inline-block; width:20%;">' + \
-                        f'    <div style="display:inline-block; width:50px;"></div><img style="display:inline-block;" src="{poster}" width:50px; height:100px;>'
-                        '  </div>' + \
-                        '  <div style="display:inline-block; padding-left: 50px; vertical-align:top; width: 50%;">' + \
-                        f'    <span style="font-size:12pt;">{title}</span><br>' + \
-                        f'    <span style="font-size: 10pt; color:#a1a1a1;">{summary[:200]}...<a style="color:#a1a1a1; font-size:8pt; font-weight:600;"> Read More</a></span><br>' + \
-                        f'    <span style="font-size: 10pt;">Recommended Age: {age_child}</span><br>' + \
-                        f'    <span style="font-size: 10pt;">Release Year: {release_year}</span><br><br>' + \
-                        f'    <span style="font-size: 10pt; font-weight:600;">Presence Scores (out of 5):</span><br>' + \
-                        f'    <span style="font-size: 10pt;">Positive Messages: {positive_messages_score}</span><br>' + \
-                        f'    <span style="font-size: 10pt;">Positive Role Models: {positive_role_models_score}</span><br>' + \
-                        f'    <span style="font-size: 10pt;">Educational Value: {educational_value_score}</span><br>' + \
-                        f'    <span style="font-size: 10pt;">Violence: {violence_score}</span><br>' + \
-                        f'    <span style="font-size: 10pt;">Violence and Scariness: {violence_scariness_score}</span><br>' + \
-                        f'    <span style="font-size: 10pt;">Sex: {sex_score}</span><br>' + \
-                        f'    <span style="font-size: 10pt;">Sex Stuff: {sexy_stuff_score}</span><br>' + \
-                        f'    <span style="font-size: 10pt;">Language: {language_score}</span><br>' + \
-                        f'    <span style="font-size: 10pt;">Consumerism: {consumerism_score}</span><br>' + \
-                        f'    <span style="font-size: 10pt;">Drinking, Drugs & Smoking: {drinking_drugs_smoking_score}</span><br><br>' + \
-                        f'     <span style="font-size: 10pt; font-weight:600; display:inline-block;">Watch now it on&emsp; </span><a href="{hbo_url}"><img style="width:35px; height:15px; display:inline-block;" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAV4AAACQCAMAAAB3YPNYAAAAflBMVEUAAAD////IyMg+Pj42NjacnJzy8vLj4+NpaWnBwcFaWlokJCReXl78/Pz29vbV1dXe3t61tbXOzs6NjY2WlpZjY2MVFRUQEBAhISExMTEbGxtGRka6urp5eXnp6eni4uKDg4OkpKSIiIgsLCxLS0usrKx8fHxRUVFwcHBBQUFTYdewAAAKVElEQVR4nO1d2YKqMAxFFFSUHcVd1GHg/v8PXh0WdWzhtAJDkfNMmnLENE2TVNIxDGhglAcfZ5zE+9ANVTVDdxINL0vflyTf36y3WuxNj6pq8CuWFAgeTd7wIPkwe/6E6SPiFO5kx7QOVdNsHJ3pWZtJFKwnJ9k88A1NG/M3aPIqJr7Onr+gCmlY/Vu44c7ie1sCDOcURMsyrZe5Z5sco6NvRZMH6R1mz49QhYVYfcWuw8XmL5jeAp2Rv4095l8VfSGa/N/Qe8Pm33nMy2oCQxmu2HTOtCmbCnRgmvzf0XvDaKfyGmLVWfDpDA7Gp9B7HfjEYxIH46nGrzOQ1U+h90Yw86quhm+Qe8Vyb38MvZIU7djYPUX+uyqXMbayouO1mV5JmjB8wOZXJSr9GNGJjtZueiVJBsm19tXpPJWbYHSottMrhchyY9jDKnXOnTK/BR2p9fT6QTm/1nfFSi9eiVJ0oNbTezXAZf6ovK1eqVZsgdFhBKBX+ip8U92rR2uh1UcHEYFeKS4whYf3XN0CnAsMBDqGEPRKCpVfuU6rRI/0oEOIQe+KFnGx13Wqjaj8oiOIQa/0RQ6ieaUB3fcwovGLDiAIvdKZZB6q9sdeQfvboPKi0Cu9xgLUc906r5iRgzyouDD0Ri8zDOpW+YMVkV9UWhh6pV/xX92tXWMCon1AhcWhd/I8wabYve6QCesbKisOvc9veapd3x3r14MTVFQceqXHnIxp/eoe8Or/opIC0RvfQztmA+oeMfm9P0YFBaL3X/4fPczr1/aMoPv0+pmL1JjT8IBf7hkqJhC9kpLqshvQ9YLn5Q2VEonefWIBrQZUvSJ6iq+jUiLRG/3EddSoAVUEeI9RD1RIJHrXP/5RTYcTpVg9Rj1QIZHo9W/2T3471ZUX2oN3hsqIRO8tanaYNKGIDOVODyrSIL1zjYAvavI4AVd6Q4bHK8d9dUMlGqT3MCbAckI8A8QZHHj/JTNt753CnR0q7mTLm4oWt5lemqoxvEtwOONkE9saH9KMYd1QD0dT+cczzjI/nEclWkAvHv5yDPDBB6wm5IQFNfxiP6ibZM4ZKtAKenUw/85kPlyLlIJsG3PPmpm2yfbGqEAr6B2YmLd1Yjx2j8pyHU2XccRYFZHeAZRqsxwyrUlLpbwERjfZEld9WUh6FUTZhond9RGqfjHYAkTfhoj0muh8YTxFaA3Dcefrn1/HH8Yn66ncdcxUSmSJSC+HS1CI9UN81jBfKlqWsfzwbRss7t63iPTC8wWndQ+/GHJArCHceg8hGsg2pejpXd2PHqcxddc9Cu5LH8NeeycgvdUah5xd/XtT9NzolE8AP9jXBKRXRucL4J4QMS2NF2n5szC/M0s8eiuMkc+ypCVDARy5ZZ7iBK9vinj0VpjBnx3a6AH2fH7+jM7hFnhAJ9MOesFNMQItSzZBt2ObrKOKBe5abvkW6GzaQW+FedBZlCGAJfysdBncv93yLdCxaS8MLuXV0FvhEUT6KbJlmqSBBBX84F0dpleekgH+kpXQG7IcCBVDSw2vzRSeuKQOsIPFz7RxxbsgKiqgV62y/iT1A46Mgdw0dxhcDWemMPRaXpVlf1k4lrnfS2pTwCVWbiO9lxkBlVZOZUl+7Nm/23R7EUNPKzqzAj40m+dQhnly8qNz1BK66Z8JenhRdYCPhnbRm+avhxwH7cM0AxL6Zdag2/o2WkXvJaFI5UquPiU+BxZ66Bi9I2j926aWl8vP2yaG5QA93FQObEP0ulABZmo/OcNDSXTdgBoe7fhUMKMZel0V8rQS22BxdoRKMpx06OCiqSTYRugNBkeonUsyE4dTyzIRhyLPmP/2Ppqg1zMGFuLuX1K/gVdPYnxNxBOvrQPKL9RP79K+Lulm4ZlOikViPLmjb8mexEKS+2rojURE3fT6i59vCkqDSLxelbsZX5IZAeVnN5UhXy+9l8mOwZ4mX98B+dCJmCdffwA8yq2DEXXSq3nTLNUDotdhcFxJSNxmKFJcc4+ZHHXRu3Z3zkMCHkSv9Sa96bsgntnbnVZB1EXvcv+U3QjRy7LtIiFts99kK4My1Ggc1rba01vn0jYKDyz09saBFXO7X9pqpFdang2Y3oocM2Rb0gXHLMH8tsY1ua1Aokfd2FYkKpx+U1xnSGdoYiGdWTKTPqTDiK067gOSNSKGDGI14XQoUt6pcPp11ekPg2pVAx3+9keZ3ED2Sf1BPC98aBvap5HUij4JqlZkKXzsdUZZCh/WqaeVKXzxhACt0st+PjkBdUCCYYacly8SwZk+nTbJ6V769M0XQurPQOTJ/0whw0saV64++V8ltWcajw9gB4Bme+kAaKJ0xcNLV2hv3Ghl0KDCKxKyA44AlviLwqtm69qs6u6mifqywVdU2LqQseg1/3Z1tLNqLFzRa5WFg7OML6hke5V3OetyyXaVMZJZ3ihaLg3uzD+j4QCyDcLdN7hdRphPoNvtMpD54q7sU7MX6kZsFNw79HW82Qsy3xV+/D2694005IBoIj6qVRGiLmLYPV+eGm3Zv48eN7HzUY22kBhXwOReuI/DG4aZtYlbDuPT8Y02cUcR6UW+n2DMdEi5tvomhxkQl/6bce/sK8dScnWT7UzdTw02+nw76IXirN8Di/GQsrB7749elzGdScwGswGiK8DjCDkir2+PPNhBLteZq1nfakG+rPVzmnvLWLzsdg7M15p+Eb60puc6gxKxNb1hY/bPP92mxXs0t4r27tsXK+zzSaMSf03v2EYTRhO7118LQsNiTsAW3unOfnwitb/Uph6MEp+ov5KpHqQJen92odis2xeKZddA99fh1YLc8v3NZY7a0w0jqJQ49N7vAu2vIq0B97lhCfrVInymBxUThl7tYXJYqUWV6Pw10E/3MPeXmFeN58hXlTcFlCN6CRyjkqLQOzGe59dUbc4Na/M3O52j9+XKwObch/s9GJ2lV3u5ek1XGqr6X5HixaiwIPQqrzNkOj7nx8p+Vd01ereE/2cz/M6I7HaMXpc8yfq3F0TL0DV6t7SMBbvmtiAj0r+mc/RSPqErdtWltRMQ0djtFL172iSvkGtUPKGnoaBDCEDvV2EuyLi28G9QcMkxOkb76V05tDkm4G+eUwyyy9A1ejc72hRz7JDuQox4DTN0k96QNsMHWFV/wBev5PZzdKC201v4F81h2JVWfs+dstxVdKSW04uxe4XFnN1Hx6nk0+0KvcOSVe0JJnf7vSf4cUnSamfo/UZe9AGn6O3S+mWM/aLoeO2ldxtCyftPkw65uhTl2OxRY4SO2FZ6Nx51Q1qEw/QNggO53Oh2g17vwPzpZhN3OJP8zgejfPQO0LvaKrzcJjCU4YpN5WxOjxoRgQ5Mk/8jev3hwmVxF2gwvQU6o+U2ZjdE6PvQ5EF6L9nzjJ8LAf46+lbsUoceheGE56j0OO4y92weIy/JGGjy+hQSz780B9RHH8kxjwzGD4F+NKfunFqsNZqcZJPR98tQXCD9OdANVTVtN9b+XTa3Tom+v1lv53tlelRVg/+f8h9RlqixRug4RQAAAABJRU5ErkJggg=="></a>' + \
-                        f'     &emsp;<span style="font-size: 10pt; font-weight:600; display:inline-block;">or</span>&emsp;<a href="{hbo_url}"><img style="width:35px; height:20px; display:inline-block;" src="data:image/png;base64,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"></a>' + \
-                        f'     &emsp;<span style="font-size: 10pt; font-weight:600; display:inline-block;">Watch a trailer on </span>&emsp;<a href="{movie_trailer_url}"><img style="width:60px; height:25px; display:inline-block;" src="data:image/png;base64,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"></a>' + \
-                        '  </div>' + \
-                        '  <div style="display:inline-block; padding-left:30px; float:right; vertical-align:top; width:25%; padding-top:30px;">' + \
-                        f'    <div style="width:100%; padding-top: 10px; color:white; height: 150px; background-color: #a6a7a8; text-align:center; font-size:10pt;">Average Acceptability Score<br><span style="font-size:30pt; color:white;">{avg_score}</span>' + \
-                        '    </div>' + \
-                        '  </div>' + \
-                        '</div>',
-                        unsafe_allow_html=True)
-
-            st.markdown('<br><br><br>',
-                        unsafe_allow_html=True)
-
-# If the user chooses an issue to dig into, do this
-else:
-    # Filter to the issue and make sure that there is associated data. If there isn't default to just send the user to HBO
-    trending_df2 = trending_df[trending_df['social_issue'] == option]
-    tmp_titles = trending_df2.title.dropna().unique()
-    if option in trending_df2.social_issue.dropna().unique() and len(tmp_titles) > 1:
-        new_trending_df = make_sidebar(trending_df, trending_df2)
-        
-        # Find if the data still has titles present, if not, default to send user to HBO
-        if option in new_trending_df.social_issue.dropna().unique().tolist():
-
-            # Show titles in descending avg_score order
-            new_trending_df = new_trending_df.sort_values('avg_score', ascending=False).head(10)
-            print(new_trending_df)
-            titles = new_trending_df.title.dropna().unique()
-            st.markdown('<div>' + \
-                        '  <div style="display:inline-block; width:50%;">' + \
-                        f'    <span style="font-size:18pt; font-weight:600;">&emsp;&emsp;{option.replace("_", " ").title()}</span>'
-                        '  </div><br><br><br>',
-                        unsafe_allow_html=True)
-            
-            # Show the top 10 titles for the issue based on average score
-            for title in titles:
-
-                # Check that there is actually data
-                title_df = new_trending_df[new_trending_df['title'] == title]
-                if len(title_df):
-                    
-                    # superrr inefficienttttt but blegh
-                    poster = title_df.poster.values[0]
-                    release_year = title_df.original_release_year.values[0]
-                    title = title_df.title.values[0]
-                    summary = title_df.summary.values[0]
-                    age_child = title_df.age_child.values[0]
-                    positive_messages_score = title_df.positive_messages_score.values[
-                        0]
-                    positive_role_models_score = title_df.positive_role_models_score.values[0]
-                    violence_score = title_df.violence_score.values[0]
-                    sex_score = title_df.sex_score.values[0]
-                    language_score = title_df.language_score.values[0]
-                    consumerism_score = title_df.consumerism_score.values[0]
-                    drinking_drugs_smoking_score = title_df.drinking_drugs_smoking_score.values[0]
-                    avg_score = title_df.avg_score.values[0]
-                    hbo_url = title_df.hbo_url.values[0]
-                    sexy_stuff_score = title_df.sexy_stuff_score.values[0]
-                    educational_value_score = title_df.educational_value_score.values[0]
-                    violence_scariness_score = title_df.violence_scariness_score.values[0]
-                    movie_trailer_url = title_df.movie_trailer_url.values[0]
-
-                    # Actually display the title details
-                    st.markdown('<div style="width:100%;">' + \
-                                '  <div style="display:inline-block; width:20%;">' + \
-                                f'    <div style="display:inline-block; width:50px;"></div><img style="display:inline-block;" src="{poster}" width:50px; height:100px;>'
-                                '  </div>' + \
-                                '  <div style="display:inline-block; padding-left: 50px; vertical-align:top; width: 50%;">' + \
-                                f'    <span style="font-size:12pt;">{title}</span><br>' + \
-                                f'    <span style="font-size: 10pt; color:#a1a1a1;">{summary[:200]}...<a style="color:#a1a1a1; font-size:8pt; font-weight:600;"> Read More</a></span><br>' + \
-                                f'    <span style="font-size: 10pt;">Recommended Age: {age_child}</span><br>' + \
-                                f'    <span style="font-size: 10pt;">Release Year: {release_year}</span><br><br>' + \
-                                f'    <span style="font-size: 10pt; font-weight:600;">Presence Scores (out of 5):</span><br>' + \
-                                f'    <span style="font-size: 10pt;">Positive Messages: {positive_messages_score}</span><br>' + \
-                                f'    <span style="font-size: 10pt;">Positive Role Models: {positive_role_models_score}</span><br>' + \
-                                f'    <span style="font-size: 10pt;">Educational Value: {educational_value_score}</span><br>' + \
-                                f'    <span style="font-size: 10pt;">Violence: {violence_score}</span><br>' + \
-                                f'    <span style="font-size: 10pt;">Violence and Scariness: {violence_scariness_score}</span><br>' + \
-                                f'    <span style="font-size: 10pt;">Sex: {sex_score}</span><br>' + \
-                                f'    <span style="font-size: 10pt;">Sexy Stuff: {sexy_stuff_score}</span><br>' + \
-                                f'    <span style="font-size: 10pt;">Language: {language_score}</span><br>' + \
-                                f'    <span style="font-size: 10pt;">Consumerism: {consumerism_score}</span><br>' + \
-                                f'    <span style="font-size: 10pt;">Drinking, Drugs & Smoking: {drinking_drugs_smoking_score}</span><br><br>' + \
-                                f'     <span style="font-size: 10pt; font-weight:600; display:inline-block;">Watch now it on&emsp; </span><a href="{hbo_url}"><img style="width:35px; height:15px; display:inline-block;" src="data:image/png;base64,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"></a>' + \
-                                f'     &emsp;<span style="font-size: 10pt; font-weight:600; display:inline-block;">or</span>&emsp;<a href="{hbo_url}"><img style="width:35px; height:20px; display:inline-block;" src="data:image/png;base64,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"></a>' + \
-                                f'     &emsp;<span style="font-size: 10pt; font-weight:600; display:inline-block;">Watch a trailer on </span>&emsp;<a href="{movie_trailer_url}"><img style="width:60px; height:25px; display:inline-block;" src="data:image/png;base64,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"></a>' + \
-                                '  </div>' + \
-                                '  <div style="display:inline-block; padding-left:30px; float:right; vertical-align:top; width:25%; padding-top:30px;">' + \
-                                f'    <div style="width:100%; padding-top: 10px; color:white; height: 150px; background-color: #a6a7a8; text-align:center; font-size:10pt;">Average Acceptability Score<br><span style="font-size:30pt; color:white;">{avg_score}</span>' + \
-                                '    </div>' + \
-                                '  </div>' + \
-                                '</div>',
-                                unsafe_allow_html=True)
-
-                    st.markdown('<br><br><br>',
-                                unsafe_allow_html=True)
-
-        else:
-            st.markdown('<div style="width:100%; text-align: center; font-size:20pt; padding-top: 50px;">No Options...but there are a lot of great shows on <a href="https://play.hbonow.com/"><img style="width:350px; height:150px; display:inline-block;" src="data:image/png;base64,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"></a></div>',
-                     unsafe_allow_html=True)
-    else:
-        st.markdown(
-            '<div style="width:100%; text-align: center; font-size:20pt; padding-top: 50px;">No Options...but there are a lot of great shows on <a href="https://play.hbonow.com/"><img style="width:350px; height:150px; display:inline-block;" src="data:image/png;base64,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"></a></div>',
-            unsafe_allow_html=True)
+# main block run by code
+if __name__ == '__main__':
+    main_page()
