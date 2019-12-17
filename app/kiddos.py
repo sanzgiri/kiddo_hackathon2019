@@ -6,17 +6,24 @@ import ast
 from os import path
 
 data_dir = path.join("..", "data")
+version_path = path.join("..", "_version.py")
 
 def main_page():
+    # read in version information
+    version_dict = {}
+    with open(version_path) as file:
+        exec(file.read(), version_dict)
+    
     # Create the title
-    st.markdown('''<div style="font-size:5pt; 
+    st.markdown(f"""<div style="font-size:5pt; 
                                font-weight:100; 
                                text-align:center; 
                                width=100%;">
-                     <span style="font-size:40pt;">KIDDOS</span><br>
+                     <span style="font-size:40pt;">{version_dict['__project__']}</span><br>
                      <span style="font-size:15pt; 
-                                  color:#a1a1a1;">Kurated Informative Documents Describing Our Society</span>
-                   </div>''',
+                                  color:#a1a1a1;">{version_dict['__description__']} 
+                        (v {version_dict['__version__']})</span>
+                   </div>""",
                 unsafe_allow_html=True)
 
     # Prompt User to enter a topic they'd like to discuss
@@ -194,7 +201,12 @@ def main_page():
                 '<div style="width:100%; text-align: center; font-size:20pt; padding-top: 50px;">No Options...but there are a lot of great shows on <a href="https://play.hbonow.com/"><img style="width:350px; height:150px; display:inline-block;" src="data:image/png;base64,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"></a></div>',
                 unsafe_allow_html=True)
       
-    # end of function
+    # end of main function
+    st.markdown(f"""<br /><div style="text-align:center; width=100%;">
+                        <span style="font-size:small; color:#a1a1a1;">{version_dict['__author__']}
+                            <br /><em>collaborators</em></span></div>""",
+                unsafe_allow_html=True)
+
     pass
     
     
@@ -270,7 +282,7 @@ def draw_sidebar(trending_df, trending_df2=None):
    
     # Generate the slider filters based on the data available in this subset of titles
     # Only show the slider if there is more than one value for that slider, otherwise, don't filter
-    st.sidebar.title('Filters')
+    st.sidebar.title('Discovery Filters')
     st.sidebar.markdown("<br>",
                         unsafe_allow_html=True)
     if trending_df2.original_release_year.min() != trending_df2.original_release_year.max():
