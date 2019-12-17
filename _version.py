@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 __package__ = 'kiddos'
 __description__ = "Kurated Informative Documents Describing Our Society"
 __copyright__ = "Copyright AT&T + Xandr, Inc. 2019"
