@@ -10,7 +10,7 @@ import re
 data_dir = path.join("..", "data")
 score_dir = path.join(data_dir, "score_data")
 version_path = path.join("..", "_version.py")
-joint_scoring = False  # toggle whether we use full depth scores or single CSV
+joint_scoring = True  # toggle whether we use full depth scores or single CSV
 re_issue = re.compile(r"[^0-9A-Za-z]+")
 presence_bars = False  # toggle to show presence indicators as a graph
 
@@ -59,28 +59,39 @@ def main_page():
     # Pull in the matching movie to social issue data and merge
     trending_df['imdb_id'] = trending_df['imdb_id'].str.replace('tt','').astype(int)  # convert to int
     if joint_scoring:  # merge the CSV files embedded
-        print("SORRY THIS IS BROKEN FOR NOW...")
+        trending_df.set_index('imdb_id', drop=True, inplace=True)
         for filename in Path(score_dir).rglob(f'*.csv'):
-            print(f"Reading {filename}")
-            match_df = pd.read_csv(filename)
-            print(f"AAA")
             score_issue_str = simple_score(Path(filename).stem)
-            print(f"bbb")
-            print(match_df.sort_values('imdb_id').head(4))
-            match_df.rename(inplace=True, columns={'inf_dist_summary': score_issue_str})
-            print(f"ccc")
-            print(match_df.dtypes)
+            if score_issue_str in trending_df.columns:
+                print(f"Warning {filename}, already loaded as {score_issue_str}")
+                
+            print(f"Reading {filename}")
+            match_df = pd.read_csv(filename, dtype=str)
+            match_df['imdb_id'] = match_df['imdb_id'].str.replace('tt','').astype(int)
+            match_df.drop_duplicates('imdb_id', inplace=True)
+            # print(f"AAA new: {len(match_df)}")
             match_df['imdb_id'] = match_df['imdb_id'].astype(int)  # coerce to int
-            print(match_df.sort_values('imdb_id').head(4))
-            print(trending_df.sort_values('imdb_id').head(4))
-            print(f"ddd")
-            trending_df = trending_df.merge(match_df, on='imdb_id')
-            print(trending_df.columns)
-            print(len(trending_df))
+            match_df.set_index('imdb_id', drop=True, inplace=True)
+            match_df.rename(inplace=True, columns={'inf_dist_summary': score_issue_str})
+            match_df[score_issue_str] = match_df[score_issue_str].astype(float)
+
+            # directly insert via index
+            listMerge = set(trending_df.index).intersection(set(match_df.index))
+            trending_df[score_issue_str] = np.inf
+            # print( match_df.loc[listMerge, [score_issue_str]])
+            trending_df.loc[listMerge, [score_issue_str]] = match_df.loc[listMerge, [score_issue_str]]
+            # print(trending_df.loc[listMerge, [score_issue_str]])
+            #print(trending_df.dtypes)
+            pass   # skip to next item
     else:  # prior method to load issue matching file
         match_df = pd.read_csv(path.join(data_dir, 'issue_matching.csv'))
-        trending_df = trending_df.merge(match_df[['imdb_id','social_issue','match_score']])
-
+        # match_df.set_index('imdb_id', drop=True, inplace=True)
+        trending_df = trending_df.merge(match_df[['imdb_id', 'social_issue','match_score']])
+        
+    # debug print a few rows for diversity
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+        print(trending_df.sample(3))
+    
     # Process data to proper format
     trending_df = trending_df.rename(columns={'release_year': 'original_release_year',
                                               'hbogo_url': 'hbo_url',
@@ -88,8 +99,8 @@ def main_page():
     trending_df['scores'] = trending_df['scores'].fillna('{}')
 
     # Adjust scores to be a column per score
-    trending_df_split = [ast.literal_eval(trending_df['scores'][i]) for i in trending_df.index]
-    trending_df_split = pd.DataFrame(trending_df_split)
+    trending_df_split = [ast.literal_eval(trending_df.iloc[i]['scores']) for i in range(len(trending_df))]
+    trending_df_split = pd.DataFrame(trending_df_split, index=trending_df.index)
     trending_df = trending_df.join(trending_df_split)
     trending_df = trending_df.rename(columns={'Consumerism': 'consumerism_score',
                                               'Drinking, Drugs & Smoking': 'drinking_drugs_smoking_score',
@@ -128,7 +139,7 @@ def main_page():
     trending_df = trending_df.dropna()
     trending_df['original_release_year'] = trending_df['original_release_year'].astype(int)
     trending_df['avg_score'] = ((trending_df[['positive_messages_score',
-                                             'positive_role_models_score',
+                                              'positive_role_models_score',
                                               'educational_value_score',
                                               'neg_violence_score',
                                               'neg_sex_score',
@@ -136,8 +147,10 @@ def main_page():
                                               'neg_consumerism_score',
                                               'neg_drinking_drugs_smoking_score',
                                               'neg_sexy_stuff_score',
-                                              'neg_violence_scariness_score']].sum(axis=1) *
-                                 (trending_df['match_score'])).astype(float)/np.where(trending_df['non_zero_scores'] == 0, 1, trending_df['non_zero_scores'])).round(1).astype(float)
+                                              'neg_violence_scariness_score']].sum(axis=1) /
+                                          trending_df['non_zero_scores'].astype(float) )).round(1)
+
+    # (trending_df['match_score'])).astype(float)/np.where(trending_df['non_zero_scores'] == 0, 1, trending_df['non_zero_scores'])).round(1).astype(float)
 
     # Have a little party
     btn = st.button('I found a useful movie!')
@@ -152,9 +165,8 @@ def main_page():
         new_trending_df = draw_sidebar(trending_df)
 
         # Filter to the top titles for each social issue
-        titles = new_trending_df.sort_values(['avg_score','original_release_year'], ascending=False).groupby('social_issue').first().reset_index().title.dropna().unique().tolist()
-        new_trending_df = new_trending_df[new_trending_df['title'].isin(titles)]
-
+        new_trending_df.sort_values(['avg_score','original_release_year'], ascending=False, inplace=True)
+        
         # Show the titles
         st.markdown(
             '<br><br><div style="font-size: 22pt; font-weight:100; text-align:center; margin-left: 30%; width:40%; border-bottom: 0.5pt #a1a1a1 solid;">Trending Topics</div><br>',
@@ -175,8 +187,12 @@ def main_page():
 
         # For each social issue, show the top video
         for issue in trending_issues:
+            title_df = []
             if joint_scoring:  # sort by score (should already obey other sort criterion)
-                title_df = new_trending_df.sort_values(simple_score(issue)).head(1)
+                simple_score_str = simple_score(issue)
+                if simple_score_str in new_trending_df.columns:
+                    title_df = new_trending_df.sort_values(simple_score_str, ascending=True).head(1)
+                    print(f"SORT: {simple_score_str}, issue:{issue}, score:{title_df.head(1)[simple_score_str]}, min:{title_df[simple_score_str].min()}, max:{title_df[simple_score_str].max()}, first:{title_df.head(1)}")
             else:  # already sorted above
                 title_df = new_trending_df[new_trending_df['social_issue'] == issue]
             if len(title_df):
@@ -203,14 +219,18 @@ def main_page():
 
     # If the user chooses an issue to dig into, do this
     else:
+        sort_list = [('avg_score',False), ('original_release_year', False)]
+        
         # Filter to the issue and make sure that there is associated data. If there isn't default to just send the user to HBO
         if joint_scoring:  # sort by score (should already obey other sort criterion)
-            trending_df2 = trending_df.sort_values(simple_score(issue))
+            trending_df2 = trending_df
+            sort_list.insert(0, (simple_score(option), True))
         else:  # already sorted above
             trending_df2 = trending_df[trending_df['social_issue'] == option]
-        tmp_titles = trending_df2['title'].unique()
+            sort_list.insert(0, (trending_df['social_issue'], True))
+            
         if len(trending_df2) > 1:
-            new_trending_df = draw_sidebar(trending_df, trending_df2)
+            new_trending_df = draw_sidebar(trending_df, trending_df2, sort_list)
 
             # graphics or text for scores
             presence_mode = "Text"
@@ -218,8 +238,7 @@ def main_page():
                 presence_mode = st.sidebar.radio("Presence Display", ("Text", "Bar Chart"))
 
             # Find if the data still has titles present, if not, default to send user to HBO
-            if option in new_trending_df.social_issue.dropna().unique().tolist():
-
+            if len(new_trending_df):
                 # Show titles in descending avg_score order
                 new_trending_df = new_trending_df.sort_values('avg_score', ascending=False).head(10)
                 titles = new_trending_df.title.dropna().unique()
@@ -313,7 +332,7 @@ def draw_title(title_df, presence_mode="Text"):
     pass
 
 
-def draw_sidebar(trending_df, trending_df2=None):
+def draw_sidebar(trending_df, trending_df2=None, sort_list=None):
     if trending_df2 is None:   # handle the generic case
         trending_df2 = trending_df
    
@@ -480,126 +499,12 @@ def draw_sidebar(trending_df, trending_df2=None):
                                    (trending_df2['violence_scariness_score'] >= violence_scariness[0]) &
                                    (trending_df2['violence_scariness_score'] <= violence_scariness[1])]
 
-    if False:
-    
-        # Create the slide filters based on the full dataset
-        st.sidebar.title('Filters')
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        release_year = st.sidebar.slider('Release Year',
-                                         min_value=int(trending_df.original_release_year.min()),
-                                         max_value=int(trending_df.original_release_year.max()),
-                                         value=(int(trending_df.original_release_year.min()), int(trending_df.original_release_year.max())),
-                                         step=1)
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        avg_score = st.sidebar.slider('Average Acceptability Score',
-                                      min_value=trending_df.avg_score.min(),
-                                      max_value=trending_df.avg_score.max(),
-                                      value=(trending_df.avg_score.min(), trending_df.avg_score.max()),
-                                      step=0.1)
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        positive_messages = st.sidebar.slider('Positive Messages Score',
-                                               min_value=float(trending_df.positive_messages_score.min()),
-                                               max_value=float(trending_df.positive_messages_score.max()),
-                                               value=(float(trending_df.positive_messages_score.min()), float(trending_df.positive_messages_score.max())),
-                                               step=0.5)
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        positive_role_models = st.sidebar.slider('Positive Role Models Score',
-                                                  min_value=float(trending_df.positive_role_models_score.min()),
-                                                  max_value=float(trending_df.positive_role_models_score.max()),
-                                                  value=(float(trending_df.positive_role_models_score.min()), float(trending_df.positive_role_models_score.max())),
-                                                  step=0.5)
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        educational_value = st.sidebar.slider('Educational Value Score',
-                                                   min_value=float(trending_df.educational_value_score.min()),
-                                                   max_value=float(trending_df.educational_value_score.max()),
-                                                   value=(float(trending_df.educational_value_score.min()),
-                                                          float(trending_df.educational_value_score.max())),
-                                                   step=0.5)
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        violence = st.sidebar.slider('Violence Score',
-                                     min_value=float(trending_df.violence_score.min()),
-                                     max_value=float(trending_df.violence_score.max()),
-                                     value=(float(trending_df.violence_score.min()), float(trending_df.violence_score.max())),
-                                     step=0.5)
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        violence_scariness = st.sidebar.slider('Violence and Scariness Score',
-                                                   min_value=float(trending_df.violence_scariness_score.min()),
-                                                   max_value=float(trending_df.violence_scariness_score.max()),
-                                                   value=(float(trending_df.violence_scariness_score.min()),
-                                                          float(trending_df.violence_scariness_score.max())),
-                                                   step=0.5)
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        sex = st.sidebar.slider('Sex Score',
-                                min_value=float(trending_df.sex_score.min()),
-                                max_value=float(trending_df.sex_score.max()),
-                                value=(float(trending_df.sex_score.min()), float(trending_df.sex_score.max())),
-                                step=0.5)
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        sexy_stuff = st.sidebar.slider('Sexy Stuff Score',
-                                                   min_value=float(trending_df.sexy_stuff_score.min()),
-                                                   max_value=float(trending_df.sexy_stuff_score.max()),
-                                                   value=(float(trending_df.sexy_stuff_score.min()),
-                                                          float(trending_df.sexy_stuff_score.max())),
-                                                   step=0.5)
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        language = st.sidebar.slider('Language Score',
-                                     min_value=float(trending_df.language_score.min()),
-                                     max_value=float(trending_df.language_score.max()),
-                                     value=(float(trending_df.language_score.min()), float(trending_df.language_score.max())),
-                                     step=0.5)
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        consumerism = st.sidebar.slider('Consumerism Score',
-                                        min_value=float(trending_df.consumerism_score.min()),
-                                        max_value=float(trending_df.consumerism_score.max()),
-                                        value=(float(trending_df.consumerism_score.min()), float(trending_df.consumerism_score.max())),
-                                        step=0.5)
-        st.sidebar.markdown("<br>",
-                            unsafe_allow_html=True)
-        drinking_drugs_smoking = st.sidebar.slider('Drinking, Drugs & Smoking Score',
-                                                   min_value=float(trending_df.drinking_drugs_smoking_score.min()),
-                                                   max_value=float(trending_df.drinking_drugs_smoking_score.max()),
-                                                   value=(float(trending_df.drinking_drugs_smoking_score.min()), float(trending_df.drinking_drugs_smoking_score.max())),
-                                                   step=0.5)
-       
-   
-    # Filter to data which meets the specified filters
-    new_trending_df = trending_df[(trending_df['original_release_year'] >= release_year[0]) &
-                                  (trending_df['original_release_year'] <= release_year[1]) &
-                                  (trending_df['avg_score'] >= avg_score[0]) &
-                                  (trending_df['avg_score'] <= avg_score[1]) &
-                                  (trending_df['positive_messages_score'] >= positive_messages[0]) &
-                                  (trending_df['positive_messages_score'] <= positive_messages[1]) &
-                                  (trending_df['positive_role_models_score'] >= positive_role_models[0]) &
-                                  (trending_df['positive_role_models_score'] <= positive_role_models[1]) &
-                                  (trending_df['violence_score'] >= violence[0]) &
-                                  (trending_df['violence_score'] <= violence[1]) &
-                                  (trending_df['sex_score'] >= sex[0]) &
-                                  (trending_df['sex_score'] <= sex[1]) &
-                                  (trending_df['language_score'] >= language[0]) &
-                                  (trending_df['language_score'] <= language[1]) &
-                                  (trending_df['consumerism_score'] >= consumerism[0]) &
-                                  (trending_df['consumerism_score'] <= consumerism[1]) &
-                                  (trending_df['drinking_drugs_smoking_score'] >= drinking_drugs_smoking[0]) &
-                                  (trending_df['drinking_drugs_smoking_score'] <= drinking_drugs_smoking[1]) &
-                                  (trending_df['sexy_stuff_score'] >= sexy_stuff[0]) &
-                                  (trending_df['sexy_stuff_score'] <= sexy_stuff[1]) &
-                                  (trending_df['educational_value_score'] >= educational_value[0]) &
-                                  (trending_df['educational_value_score'] <= educational_value[1]) &
-                                  (trending_df['violence_scariness_score'] >= violence_scariness[0]) &
-                                  (trending_df['violence_scariness_score'] <= violence_scariness[1])]
     # hard work done, return the trends!
-    return new_trending_df
+    if sort_list is None:
+        return new_trending_df
+    # otherwise apply sorting right now
+    return new_trending_df.sort_values(by=[v[0] for v in sort_list], 
+                                       ascending=[v[1] for v in sort_list])
 
 
 # main block run by code
