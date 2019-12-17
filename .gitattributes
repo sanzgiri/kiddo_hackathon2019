@@ -3,3 +3,9 @@ data/movies-list.txt filter=lfs diff=lfs merge=lfs -text
 data/app_data.tsv filter=lfs diff=lfs merge=lfs -text
 data/issue_matching.csv filter=lfs diff=lfs merge=lfs -text
 data/trend30.csv filter=lfs diff=lfs merge=lfs -text
+data/score_data/Sustainability.csv filter=lfs diff=lfs merge=lfs -text
+data/score_data/Bullying.csv filter=lfs diff=lfs merge=lfs -text
+data/score_data/Civic[[:space:]]Engagement.csv filter=lfs diff=lfs merge=lfs -text
+data/score_data/Homelessness.csv filter=lfs diff=lfs merge=lfs -text
+data/score_data/LGBTQ+.csv filter=lfs diff=lfs merge=lfs -text
+data/score_data/Substance[[:space:]]Abuse.csv filter=lfs diff=lfs merge=lfs -text
