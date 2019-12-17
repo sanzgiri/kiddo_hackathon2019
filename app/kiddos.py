@@ -331,7 +331,7 @@ option = st.selectbox('', issues_list)
 trendlines_df = pd.read_csv(path.join(data_dir, 'trend30.csv'))
 
 # Pull in the data about the movies
-trending_df = pd.read_csv(path.join(data_dir, 'data.tsv'), sep='\t')
+trending_df = pd.read_csv(path.join(data_dir, 'app_data.tsv'), sep='\t')
 
 # Pul in the matching movie to social issue data and merge
 match_df = pd.read_csv(path.join(data_dir, 'issue_matching.csv'))
