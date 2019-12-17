@@ -1,0 +1,5 @@
+data/imdb-urls.txt filter=lfs diff=lfs merge=lfs -text
+data/movies-list.txt filter=lfs diff=lfs merge=lfs -text
+data/data.tsv filter=lfs diff=lfs merge=lfs -text
+data/issue_matching.csv filter=lfs diff=lfs merge=lfs -text
+data/trend30.csv filter=lfs diff=lfs merge=lfs -text

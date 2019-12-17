@@ -3,7 +3,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import ast
+from os import path
 
+data_dir = path.join("..", "data")
 
 def make_sidebar(trending_df, trending_df2=None):
     if trending_df2 is None:   # handle the generic case
@@ -326,13 +328,13 @@ issues_list = ['Everything!',
 option = st.selectbox('', issues_list)
 
 # Pull in the trending data
-trendlines_df = pd.read_csv('trend30.csv')
+trendlines_df = pd.read_csv(path.join(data_dir, 'trend30.csv'))
 
 # Pull in the data about the movies
-trending_df = pd.read_csv('data_for_Sam_R6.tsv', sep='\t')
+trending_df = pd.read_csv(path.join(data_dir, 'data.tsv'), sep='\t')
 
 # Pul in the matching movie to social issue data and merge
-match_df = pd.read_csv('issue_matching.csv')
+match_df = pd.read_csv(path.join(data_dir, 'issue_matching.csv'))
 trending_df['imdb_id'] = trending_df['imdb_id'].str.replace('tt','').astype(int)
 trending_df = trending_df.merge(match_df[['imdb_id','social_issue','match_score']])
 
@@ -512,6 +514,7 @@ else:
 
             # Show titles in descending avg_score order
             new_trending_df = new_trending_df.sort_values('avg_score', ascending=False).head(10)
+            print(new_trending_df)
             titles = new_trending_df.title.dropna().unique()
             st.markdown('<div>' + \
                         '  <div style="display:inline-block; width:50%;">' + \
