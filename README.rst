@@ -14,31 +14,27 @@ Background
 ==========
 This project was created to help parents engage on social issues with their children through 
 ingelligence, guided content choices (see.  This application follows the spirit of guided pruning 
-and curated list generation and attempts to avoid the `"content choice paradox" <https://medium.com/8px-magazine/netflix-and-the-constant-struggle-of-making-choices-dfbd6f240d64>`.
+and curated list generation and attempts to avoid the `"content choice paradox" <https://medium.com/8px-magazine/netflix-and-the-constant-struggle-of-making-choices-dfbd6f240d64>`_.
 
 * *trends* It provides a trending topic view for those individuals who may not know where to 
-  start, or want to see what the most recent web search (or other viewership activity) may be.
+  start, or want to see what the most recent web search (or other viewership activity) may be
+  (see `Trending Example`_).
 * *social topics* Extracted from online discussion forums and modern social-good sources have 
-  been included as starter topics.
+  been included as starter topics (see `Filtering Example`_).
 * *presence scores* Sourced from content partner `Common Sense Media <https://www.commonsensemedia.org/>`_,
   these scores help to understand the impact and intensity of sub-topics within the media.
 
 
-.. |trending| image:: docs/kiddos_trending.jpg
-    :width: 100%
+.. _Trending Example:
+
+..  figure:: docs/kiddos_trending.jpg
+    :scale: 70%
+    :width: 70%
     :align: center
     :alt: Kiddos interface with trending topic
-    
+    :figclass: align-center
 
-.. |topic| image:: docs/kiddos_topic.jpg
-    :width: 100%
-    :align: center
-    :alt: Kiddos interface with specific topic    
-
-+---------------------+--------------------------+
-|      |trending|     |       |topic|            |
-+ trending topic demo | specific topic filtering |
-+---------------------+--------------------------+
+    Kiddos interface with some filters and trend line rendered.
 
 
 Technology
@@ -66,7 +62,7 @@ Interested in running it yourself? Just install streamlit and then run the app f
     pip install streamlit
     cd app; streamlit run kiddos.py
 
-
+    
 
 Adding Score Data
 -----------------
@@ -75,6 +71,7 @@ replace one of the existing categories, check out the directory `data/score_data
 *only if it's a new file* follow these simple directions to get it added to git/lfs.
 
 .. code-block:: 
+
     git lfs track data/score_data/NEWFILE.csv
     git add data/score_data/NEWFILE.csv -f
 
@@ -108,6 +105,17 @@ a single day's hack.
      with a new twist, give additional entries into the data.
    * **Additional Visualizations**: Reduce some of the text-heavy reporting to some thing with
      additional graphs.
+
+.. _Filtering Example:
+
+..  figure:: docs/kiddos_topic.jpg
+    :scale: 70%
+    :width: 70%
+    :align: center
+    :alt: Kiddos interface with specific topic
+    :figclass: align-center
+
+    Kiddos interface with specific topic and filters activated
 
 
 Team
