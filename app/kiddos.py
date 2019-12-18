@@ -69,7 +69,7 @@ def main_page():
         new_trending_df = draw_sidebar(trending_df)
 
         # Filter to the top titles for each social issue
-        new_trending_df.sort_values(['avg_score','original_release_year'], ascending=False, inplace=True)
+        new_trending_df = new_trending_df.sort_values(['avg_score','original_release_year'], ascending=False)
         
         # Show the titles
         st.markdown(
@@ -96,7 +96,7 @@ def main_page():
                 simple_score_str = simple_score(issue)
                 if simple_score_str in new_trending_df.columns:
                     title_df = new_trending_df.sort_values(simple_score_str, ascending=True).head(1)
-                    print(f"SORT: {simple_score_str}, issue:{issue}, score:{title_df.head(1)[simple_score_str]}, min:{title_df[simple_score_str].min()}, max:{title_df[simple_score_str].max()}, first:{title_df.head(1)}")
+                    # print(f"SORT: {simple_score_str}, issue:{issue}, score:{title_df.head(1)[simple_score_str]}, min:{title_df[simple_score_str].min()}, max:{title_df[simple_score_str].max()}, first:{title_df.head(1)}")
             else:  # already sorted above
                 title_df = new_trending_df[new_trending_df['social_issue'] == issue]
             if len(title_df):
@@ -143,8 +143,7 @@ def main_page():
 
             # Find if the data still has titles present, if not, default to send user to HBO
             if len(new_trending_df):
-                # Show titles in descending avg_score order
-                new_trending_df = new_trending_df.sort_values('avg_score', ascending=False).head(10)
+                new_trending_df = new_trending_df.head(10)  # grab top N results
                 titles = new_trending_df.title.dropna().unique()
                 st.markdown('<div>' + \
                             '  <div style="display:inline-block; width:50%;">' + \
@@ -505,8 +504,7 @@ def draw_sidebar(trending_df, trending_df2=None, sort_list=None):
     else:
         drinking_drugs_smoking = (0,5)
         
-    print(f"{release_year}, score:{avg_score}, positive_message:{positive_messages}")
-    print(f"Sort criterion: {sort_list}")
+    # print(f"Sort criterion: {sort_list}")
 
     # Filter by slider inputs to only show relevant titles
     new_trending_df = trending_df2[(trending_df2['original_release_year'] >= release_year[0]) &

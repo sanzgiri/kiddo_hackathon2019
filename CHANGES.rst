@@ -7,11 +7,15 @@ Changes for the Kiddos (Kurated Informative Documents Describing Our Society) pr
 0.9
 ===
 
+0.9.2
+-----
+* Improve data load/save with caching option
+* Fix sorting for global and specifici social topics
+* Incorporate scores for entire database (use simplified individual CSV)
+
 0.9.1
 -----
 * Suppression of zero-value entries for presence indicators
-* Incorporate/merge scores for full dataset (in progress)
-
 
 0.9.0
 -----
