@@ -6,6 +6,7 @@ import ast
 from os import path
 from pathlib import Path
 import re
+import hashlib
 
 data_dir = path.join("..", "data")
 score_dir = path.join(data_dir, "score_data")
@@ -28,8 +29,7 @@ def main_page():
     st.markdown(f"""<div style="font-size:5pt; font-weight:100; text-align:center; width=100%;">
                      <span style="font-size:40pt;">{version_dict['__project__']}</span><br>
                      <span style="font-size:15pt; color:#a1a1a1;">{version_dict['__description__']} 
-                        (v {version_dict['__version__']})</span>
-                   </div>""", unsafe_allow_html=True)
+                        (v {version_dict['__version__']})</span></div>""", unsafe_allow_html=True)
 
     # Prompt User to enter a topic they'd like to discuss
     st.markdown('<div style="text-align:center; font-size:12pt;"><br><br>I want to talk to my kids about...</div>',
@@ -52,105 +52,9 @@ def main_page():
 
     # Pull in the trending data
     trendlines_df = pd.read_csv(path.join(data_dir, 'trend30.csv'))
-
-    # Pull in the data about the movies
-    trending_df = pd.read_csv(path.join(data_dir, 'app_data.tsv'), sep='\t')
-
-    # Pull in the matching movie to social issue data and merge
-    trending_df['imdb_id'] = trending_df['imdb_id'].str.replace('tt','').astype(int)  # convert to int
-    if joint_scoring:  # merge the CSV files embedded
-        trending_df.set_index('imdb_id', drop=True, inplace=True)
-        for filename in Path(score_dir).rglob(f'*.csv'):
-            score_issue_str = simple_score(Path(filename).stem)
-            if score_issue_str in trending_df.columns:
-                print(f"Warning {filename}, already loaded as {score_issue_str}")
-                
-            print(f"Reading {filename}")
-            match_df = pd.read_csv(filename, dtype=str)
-            match_df['imdb_id'] = match_df['imdb_id'].str.replace('tt','').astype(int)
-            match_df.drop_duplicates('imdb_id', inplace=True)
-            # print(f"AAA new: {len(match_df)}")
-            match_df['imdb_id'] = match_df['imdb_id'].astype(int)  # coerce to int
-            match_df.set_index('imdb_id', drop=True, inplace=True)
-            match_df.rename(inplace=True, columns={'inf_dist_summary': score_issue_str})
-            match_df[score_issue_str] = match_df[score_issue_str].astype(float)
-
-            # directly insert via index
-            listMerge = set(trending_df.index).intersection(set(match_df.index))
-            trending_df[score_issue_str] = np.inf
-            # print( match_df.loc[listMerge, [score_issue_str]])
-            trending_df.loc[listMerge, [score_issue_str]] = match_df.loc[listMerge, [score_issue_str]]
-            # print(trending_df.loc[listMerge, [score_issue_str]])
-            #print(trending_df.dtypes)
-            pass   # skip to next item
-    else:  # prior method to load issue matching file
-        match_df = pd.read_csv(path.join(data_dir, 'issue_matching.csv'))
-        # match_df.set_index('imdb_id', drop=True, inplace=True)
-        trending_df = trending_df.merge(match_df[['imdb_id', 'social_issue','match_score']])
-        
-    # debug print a few rows for diversity
-    with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
-        print(trending_df.sample(3))
     
-    # Process data to proper format
-    trending_df = trending_df.rename(columns={'release_year': 'original_release_year',
-                                              'hbogo_url': 'hbo_url',
-                                              'short_desc': 'summary'})
-    trending_df['scores'] = trending_df['scores'].fillna('{}')
-
-    # Adjust scores to be a column per score
-    trending_df_split = [ast.literal_eval(trending_df.iloc[i]['scores']) for i in range(len(trending_df))]
-    trending_df_split = pd.DataFrame(trending_df_split, index=trending_df.index)
-    trending_df = trending_df.join(trending_df_split)
-    trending_df = trending_df.rename(columns={'Consumerism': 'consumerism_score',
-                                              'Drinking, Drugs & Smoking': 'drinking_drugs_smoking_score',
-                                              'Language': 'language_score',
-                                              'Positive Messages': 'positive_messages_score',
-                                              'Positive Role Models & Representations': 'positive_role_models_score',
-                                              'Sex': 'sex_score',
-                                              'Violence': 'violence_score',
-                                              'Educational Value': 'educational_value_score',
-                                              'Sexy Stuff': 'sexy_stuff_score',
-                                              'Violence & Scariness': 'violence_scariness_score'})
-
-    # Fill missing data with defaults
-    trending_df['hbo_url'] = trending_df['hbo_url'].fillna('https://play.hbonow.com/')
-    trending_df['movie_trailer_url'] = trending_df['movie_trailer_url'].fillna('https://play.hbonow.com/')
-    trending_df['age_child'] = trending_df['age_child'].fillna('Not Set')
-    trending_df = trending_df[~trending_df['title'].astype(str).str.contains('{')]
-
-    # Fill missing scores with 0
-    all_scores = ['consumerism_score','positive_messages_score','positive_role_models_score','educational_value_score','violence_score','sex_score','language_score','consumerism_score','drinking_drugs_smoking_score','sexy_stuff_score','violence_scariness_score']
-    for score in all_scores:
-        trending_df[score] = trending_df[score].fillna(0).astype(int)
-        trending_df[score] = np.where(~trending_df[score].isin([1,2,3,4,5]), 0, trending_df[score])
-
-    # Invert "negative" scores so they can be assessed similarly to the "positive" scores
-    neg_scores = ['violence_score','sex_score','language_score','consumerism_score','drinking_drugs_smoking_score','sexy_stuff_score','violence_scariness_score']
-    for neg_score in neg_scores:
-        trending_df['neg_' + neg_score] = np.where(trending_df[neg_score] == 1, 5,
-                                                   np.where(trending_df[neg_score] == 2, 4,
-                                                            np.where(trending_df[neg_score] == 4, 2,
-                                                                     np.where(trending_df[neg_score] == 5, 1,
-                                                                              trending_df[neg_score]))))
-
-    # Calculate a VERY basic average score for each title
-    trending_df['non_zero_scores'] = trending_df[all_scores].astype(bool).sum(axis=1) + 1
-    trending_df = trending_df.dropna()
-    trending_df['original_release_year'] = trending_df['original_release_year'].astype(int)
-    trending_df['avg_score'] = ((trending_df[['positive_messages_score',
-                                              'positive_role_models_score',
-                                              'educational_value_score',
-                                              'neg_violence_score',
-                                              'neg_sex_score',
-                                              'neg_language_score',
-                                              'neg_consumerism_score',
-                                              'neg_drinking_drugs_smoking_score',
-                                              'neg_sexy_stuff_score',
-                                              'neg_violence_scariness_score']].sum(axis=1) /
-                                          trending_df['non_zero_scores'].astype(float) )).round(1)
-
-    # (trending_df['match_score'])).astype(float)/np.where(trending_df['non_zero_scores'] == 0, 1, trending_df['non_zero_scores'])).round(1).astype(float)
+    # load data, allowing for a cache
+    trending_df = data_load("data_bundle", True)
 
     # Have a little party
     btn = st.button('I found a useful movie!')
@@ -266,9 +170,137 @@ def main_page():
                             <br /><em>collaborators</em></span></div>""",
                 unsafe_allow_html=True)
 
+    # end of main function
     pass
     
     
+def data_load(stem_datafile, allow_cache=True):
+    """Because of repetitive loads in streamlit, a method to read/save cache data according to modify time."""
+
+    # generate a checksum of the input files
+    m = hashlib.md5()
+    for filepath in Path(data_dir).rglob(f'*.csv'):
+        m.update(str(filepath.stat().st_mtime).encode())
+
+    # NOTE: according to this article, we should use 'feather' but it has depedencies, so we use pickle
+    # https://towardsdatascience.com/the-best-format-to-save-pandas-data-414dca023e0d
+    path_new = path.join(data_dir, f"{stem_datafile}.{m.hexdigest()[:8]}.pkl")
+
+    # see if checksum matches the datafile (plus stem)
+    if allow_cache and path.exists(path_new):
+        # if so, load old datafile, skip reload
+        return pd.read_pickle(path_new)
+        
+    print(f"Data has changed, regenerating core data bundle file {path_new}...")
+    
+    # if not, delete old file reload all data
+    for filepath in Path(data_dir).rglob(f'{stem_datafile}*.feather'):
+        filepath.unlink()
+    
+    # Pull in the data about the movies
+    trending_df = pd.read_csv(path.join(data_dir, 'app_data.tsv'), sep='\t')
+
+    # Pull in the matching movie to social issue data and merge
+    trending_df['imdb_id'] = trending_df['imdb_id'].str.replace('tt','').astype(int)  # convert to int
+    if joint_scoring:  # merge the CSV files embedded
+        trending_df.set_index('imdb_id', drop=True, inplace=True)
+        for filename in Path(score_dir).rglob(f'*.csv'):
+            score_issue_str = simple_score(Path(filename).stem)
+            if score_issue_str in trending_df.columns:
+                print(f"Warning {filename}, already loaded as {score_issue_str}")
+                
+            print(f"Reading {filename}")
+            match_df = pd.read_csv(filename, dtype=str)
+            match_df['imdb_id'] = match_df['imdb_id'].str.replace('tt','').astype(int)
+            match_df.drop_duplicates('imdb_id', inplace=True)
+            # print(f"AAA new: {len(match_df)}")
+            match_df['imdb_id'] = match_df['imdb_id'].astype(int)  # coerce to int
+            match_df.set_index('imdb_id', drop=True, inplace=True)
+            match_df.rename(inplace=True, columns={'inf_dist_summary': score_issue_str})
+            match_df[score_issue_str] = match_df[score_issue_str].astype(float)
+
+            # directly insert via index
+            listMerge = set(trending_df.index).intersection(set(match_df.index))
+            trending_df[score_issue_str] = np.inf
+            # print( match_df.loc[listMerge, [score_issue_str]])
+            trending_df.loc[listMerge, [score_issue_str]] = match_df.loc[listMerge, [score_issue_str]]
+            # print(trending_df.loc[listMerge, [score_issue_str]])
+            #print(trending_df.dtypes)
+            pass   # skip to next item
+    else:  # prior method to load issue matching file
+        match_df = pd.read_csv(path.join(data_dir, 'issue_matching.csv'))
+        # match_df.set_index('imdb_id', drop=True, inplace=True)
+        trending_df = trending_df.merge(match_df[['imdb_id', 'social_issue','match_score']])
+        
+    # debug print a few rows for diversity
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+        print(trending_df.sample(3))
+    
+    # Process data to proper format
+    trending_df = trending_df.rename(columns={'release_year': 'original_release_year',
+                                              'hbogo_url': 'hbo_url',
+                                              'short_desc': 'summary'})
+    trending_df['scores'] = trending_df['scores'].fillna('{}')
+
+    # Adjust scores to be a column per score
+    trending_df_split = [ast.literal_eval(trending_df.iloc[i]['scores']) for i in range(len(trending_df))]
+    trending_df_split = pd.DataFrame(trending_df_split, index=trending_df.index)
+    trending_df = trending_df.join(trending_df_split)
+    trending_df = trending_df.rename(columns={'Consumerism': 'consumerism_score',
+                                              'Drinking, Drugs & Smoking': 'drinking_drugs_smoking_score',
+                                              'Language': 'language_score',
+                                              'Positive Messages': 'positive_messages_score',
+                                              'Positive Role Models & Representations': 'positive_role_models_score',
+                                              'Sex': 'sex_score',
+                                              'Violence': 'violence_score',
+                                              'Educational Value': 'educational_value_score',
+                                              'Sexy Stuff': 'sexy_stuff_score',
+                                              'Violence & Scariness': 'violence_scariness_score'})
+
+    # Fill missing data with defaults
+    trending_df['hbo_url'] = trending_df['hbo_url'].fillna('https://play.hbonow.com/')
+    trending_df['movie_trailer_url'] = trending_df['movie_trailer_url'].fillna('https://play.hbonow.com/')
+    trending_df['age_child'] = trending_df['age_child'].fillna('Not Set')
+    trending_df = trending_df[~trending_df['title'].astype(str).str.contains('{')]
+
+    # Fill missing scores with 0
+    all_scores = ['consumerism_score','positive_messages_score','positive_role_models_score','educational_value_score','violence_score','sex_score','language_score','consumerism_score','drinking_drugs_smoking_score','sexy_stuff_score','violence_scariness_score']
+    for score in all_scores:
+        trending_df[score] = trending_df[score].fillna(0).astype(int)
+        trending_df[score] = np.where(~trending_df[score].isin([1,2,3,4,5]), 0, trending_df[score])
+
+    # Invert "negative" scores so they can be assessed similarly to the "positive" scores
+    neg_scores = ['violence_score','sex_score','language_score','consumerism_score','drinking_drugs_smoking_score','sexy_stuff_score','violence_scariness_score']
+    for neg_score in neg_scores:
+        trending_df['neg_' + neg_score] = np.where(trending_df[neg_score] == 1, 5,
+                                                   np.where(trending_df[neg_score] == 2, 4,
+                                                            np.where(trending_df[neg_score] == 4, 2,
+                                                                     np.where(trending_df[neg_score] == 5, 1,
+                                                                              trending_df[neg_score]))))
+
+    # Calculate a VERY basic average score for each title
+    trending_df['non_zero_scores'] = trending_df[all_scores].astype(bool).sum(axis=1) + 1
+    trending_df = trending_df.dropna()
+    trending_df['original_release_year'] = trending_df['original_release_year'].astype(int)
+    trending_df['avg_score'] = ((trending_df[['positive_messages_score',
+                                              'positive_role_models_score',
+                                              'educational_value_score',
+                                              'neg_violence_score',
+                                              'neg_sex_score',
+                                              'neg_language_score',
+                                              'neg_consumerism_score',
+                                              'neg_drinking_drugs_smoking_score',
+                                              'neg_sexy_stuff_score',
+                                              'neg_violence_scariness_score']].sum(axis=1) /
+                                          trending_df['non_zero_scores'].astype(float) )).round(1)
+
+    # (trending_df['match_score'])).astype(float)/np.where(trending_df['non_zero_scores'] == 0, 1, trending_df['non_zero_scores'])).round(1).astype(float)
+
+    # save new data file before returning
+    trending_df.to_pickle(path_new)
+    return trending_df
+
+
 def draw_title(title_df, presence_mode="Text"):
     if len(title_df):
         title = title_df.title.values[0]
@@ -472,6 +504,9 @@ def draw_sidebar(trending_df, trending_df2=None, sort_list=None):
                                                step=0.5)
     else:
         drinking_drugs_smoking = (0,5)
+        
+    print(f"{release_year}, score:{avg_score}, positive_message:{positive_messages}")
+    print(f"Sort criterion: {sort_list}")
 
     # Filter by slider inputs to only show relevant titles
     new_trending_df = trending_df2[(trending_df2['original_release_year'] >= release_year[0]) &
