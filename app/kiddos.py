@@ -14,7 +14,7 @@ version_path = path.join("..", "_version.py")
 joint_scoring = True  # toggle whether we use full depth scores or single CSV
 re_issue = re.compile(r"[^0-9A-Za-z]+")
 presence_bars = False  # toggle to show presence indicators as a graph
-
+issue_titles = 10   # how many titles to show on single issue
 
 def simple_score(str_source):
     return f"score_{re_issue.sub(r'_', str_source)}"
@@ -143,8 +143,7 @@ def main_page():
 
             # Find if the data still has titles present, if not, default to send user to HBO
             if len(new_trending_df):
-                new_trending_df = new_trending_df.head(10)  # grab top N results
-                titles = new_trending_df.title.dropna().unique()
+                title_df = new_trending_df.head(issue_titles)  # grab top N results
                 st.markdown('<div>' + \
                             '  <div style="display:inline-block; width:50%;">' + \
                             f'    <span style="font-size:18pt; font-weight:600;">&emsp;&emsp;{option.replace("_", " ").title()}</span>'
@@ -152,11 +151,15 @@ def main_page():
                             unsafe_allow_html=True)
 
                 # Show the top 10 titles for the issue based on average score
-                for title in titles:
+                for title in list(title_df["title"]):
                     # Check that there is actually data
-                    title_df = new_trending_df[new_trending_df['title'] == title]
-                    draw_title(title_df, presence_mode)
+                    draw_title(title_df[title_df["title"] == title], presence_mode)
                     
+                # end of main function
+                st.markdown(f"""<br /><div style="text-align:center; width=100%;">
+                                    <span style="font-size:small; color:#8e8e8e;">
+                                (about {len(new_trending_df)} matching titles)</span></div>""",
+                            unsafe_allow_html=True)
 
         else:
             st.markdown(
@@ -232,14 +235,19 @@ def data_load(stem_datafile, allow_cache=True):
         trending_df = trending_df.merge(match_df[['imdb_id', 'social_issue','match_score']])
         
     # debug print a few rows for diversity
-    with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
-        print(trending_df.sample(3))
+    # with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+    #    print(trending_df.sample(3))
     
     # Process data to proper format
     trending_df = trending_df.rename(columns={'release_year': 'original_release_year',
                                               'hbogo_url': 'hbo_url',
                                               'short_desc': 'summary'})
     trending_df['scores'] = trending_df['scores'].fillna('{}')
+
+    # now, extract age from the data for another slider (from age 8+); added 0.9.3
+    trending_df["age_number"] = trending_df.age_child.fillna('0').str.replace('None', '0')
+    trending_df["age_number"] = trending_df.age_number.str.replace(r'age (\d+)\+', r'\1').astype(int)
+    
 
     # Adjust scores to be a column per score
     trending_df_split = [ast.literal_eval(trending_df.iloc[i]['scores']) for i in range(len(trending_df))]
@@ -394,6 +402,18 @@ def draw_sidebar(trending_df, trending_df2=None, sort_list=None):
                             unsafe_allow_html=True)
     else:
         avg_score = (0,5)
+
+    # added 0.9.3, filtering on int-based age
+    if trending_df2.age_number.min() != trending_df2.age_number.max():
+        value = (float(trending_df2.age_number.min()), float(trending_df2.age_number.max()))
+        age_number = st.sidebar.slider('Age',
+                                               min_value=float(trending_df2.age_number.min()),
+                                               max_value=float(trending_df2.age_number.max()),
+                                               value=value,
+                                               step=0.5)
+    else:
+        age_number = (0,5)        
+        
     if trending_df2.positive_messages_score.min() != trending_df2.positive_messages_score.max():
         value = (float(trending_df2.positive_messages_score.min()), float(trending_df2.positive_messages_score.max()))
         positive_messages = st.sidebar.slider('Positive Messages Score',
@@ -511,6 +531,8 @@ def draw_sidebar(trending_df, trending_df2=None, sort_list=None):
                                    (trending_df2['original_release_year'] <= release_year[1]) &
                                    (trending_df2['avg_score'] >= avg_score[0]) &
                                    (trending_df2['avg_score'] <= avg_score[1]) &
+                                   (trending_df2['age_number'] >= age_number[0]) &
+                                   (trending_df2['age_number'] <= age_number[1]) &
                                    (trending_df2['positive_messages_score'] >= positive_messages[0]) &
                                    (trending_df2['positive_messages_score'] <= positive_messages[1]) &
                                    (trending_df2['positive_role_models_score'] >= positive_role_models[0]) &
